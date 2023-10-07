@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include "process.h"
 #include "queue.h"
-#include "process.h" // Include the process header file
 
 // Create a new empty queue
 Queue *createQueue()
@@ -19,7 +19,7 @@ Queue *createQueue()
 }
 
 // Enqueue a new element at the rear of the queue
-void enqueue(Queue *queue, struct Process *data) // Update the parameter type
+void enqueue(Queue *queue, struct Process *data)
 {
   QueueNode *newNode = (QueueNode *)malloc(sizeof(QueueNode));
   if (newNode == NULL)
@@ -45,7 +45,7 @@ void enqueue(Queue *queue, struct Process *data) // Update the parameter type
 }
 
 // Dequeue the element at the front of the queue
-struct Process *dequeue(Queue *queue) // Update the return type
+struct Process *dequeue(Queue *queue)
 {
   if (isEmpty(queue))
   {
@@ -70,7 +70,7 @@ int length(Queue *queue)
 }
 
 // Peek at the element at the front of the queue without dequeuing
-struct Process *peek(Queue *queue) // Update the return type
+struct Process *peek(Queue *queue)
 {
   if (isEmpty(queue))
   {

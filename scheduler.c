@@ -2,17 +2,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "process.h"
 #include "list.h"
 #include "scheduler.h"
-#include "process.h"
 #include "queue.h"
 
 #define SIZE 100
 
 void first_come_first_served(int num_of_processes, Queue *processQueue, Process *input);
 void sort(Process *processes[], int num_of_processes);
-void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input);
+void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses);
 void check_process_completion(int num_of_processes, int *processIDs, Process *input);
+void checkBlockedProcesses(Queue *blockedProcesses, Process *processArray, int index);
+void decrementBlockedProcessesIO(Queue *blockedProcesses);
 int determine_CPU_timer(Process *process);
 
 int main(int argc, char *argv[])
@@ -70,45 +72,42 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 	// Process holder
 	Process *tempP;
 
-	// Array for holding the processes ready to run
-	Process *readyProcesses[num_of_processes];
-
 	// Array for holding the process running (only one can run)
 	Process *runningProcess[1];
 	runningProcess[0] = NULL; // Initialize to NULL
 
-	// Array for holding the processes blocked
-	Process *blockedProcesses[num_of_processes];
+	// Queue for holding blocked processes
+	Queue *blockedProcesses;
+	blockedProcesses = createQueue();
 
 	// Output message
 	char *outputMessage = malloc(20 * num_of_processes * sizeof(char));
 
 	int timer = 0;
 	int check = 1;
-	int CPUTimer = 0;
-	int IOTimer = 0;
+	int burstTimer = 0;
 	while (check != 0)
 	{
-		add_processes_at_current_time(num_of_processes, timer, processQueue, input);
+		decrementBlockedProcessesIO(blockedProcesses);
+		add_processes_at_current_time(num_of_processes, timer, processQueue, input, blockedProcesses);
 		if (processQueue->size > 0)
 		{
 			if (runningProcess[0] == NULL)
 			{
 				tempP = dequeue(processQueue);
 				runningProcess[0] = tempP;
-				CPUTimer = determine_CPU_timer(tempP);
+				burstTimer = determine_CPU_timer(tempP);
 			}
 		}
-		if (CPUTimer > 0) // If CPU timer is running for a process, then decrement the timer
+		if (burstTimer > 0) // If CPU timer is running for a process, then decrement the timer
 		{
-			CPUTimer--;
+			burstTimer--;
 		}
-		else // Otherwise it has ended and IO time has started, process can be removed from running array
+		else if (burstTimer == 0 && runningProcess[0] != NULL) // Otherwise it has ended and IO time has started, process can be removed from running array
 		{
 			if (tempP->cpu_time > 0)
 			{
-				blockedProcesses[0] = tempP; // CONVERT BLOCKEDPROCESSES INTO QUEUE
-				IOTimer = tempP->io_time;
+				enqueue(blockedProcesses, tempP);
 			}
 			runningProcess[0] == NULL;
 		}
@@ -161,8 +160,12 @@ void sort(Process *processes[], int num_of_processes)
 }
 
 // Check if the processes have an arrival time the same as the current timer, if so add to queue
-void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input)
+void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses)
 {
+	// Temp queue that adds all the current ready processes
+	Queue *tempQueue;
+	tempQueue = createQueue();
+
 	if (num_of_processes == 0 || input == NULL)
 	{
 		return;
@@ -171,7 +174,7 @@ void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue
 	int count = 0; // Initialize count
 
 	// Create array with the size as the number found above, then add those processes to that array
-	Process *process_array[num_of_processes]; // Use the maximum possible size
+	Process *processArray[num_of_processes]; // Use the maximum possible size
 
 	for (int i = 0; i < num_of_processes; i++)
 	{
@@ -182,18 +185,21 @@ void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue
 			process->cpu_time = input[i].cpu_time;
 			process->io_time = input[i].io_time;
 			process->arrival_time = input[i].arrival_time;
-			process_array[count] = process;
+			processArray[count] = process;
 			count++; // Increment count
 		}
 	}
 
+	// Add any blocked processes that are ready into process array
+	checkBlockedProcesses(blockedProcesses, processArray, count);
+
 	// Sort the processes array
-	sort(process_array, count); // Sort only the valid elements
+	sort(processArray, count); // Sort only the valid elements
 
 	// Add the processes to the queue
 	for (int i = 0; i < count; i++)
 	{
-		enqueue(queue, process_array[i]);
+		enqueue(queue, processArray[i]);
 	}
 }
 
@@ -231,4 +237,59 @@ int determine_CPU_timer(Process *process)
 	}
 	process->cpu_time = process->cpu_time - timer;
 	return timer;
+}
+
+// Decrement the blocked processes IO time
+void decrementBlockedProcessesIO(Queue *blockedProcesses)
+{
+	// Create a temporary queue to store processes that will be processed
+	Queue *tempQueue = createQueue();
+
+	// Dequeue each process and decrement IO
+	while (!isEmpty(blockedProcesses))
+	{
+		Process *process = dequeue(blockedProcesses);
+		process->io_time--;
+		enqueue(tempQueue, process);
+	}
+
+	// Move the processes back from the temporary queue to the blockedProcesses queue
+	while (!isEmpty(tempQueue))
+	{
+		enqueue(blockedProcesses, dequeue(tempQueue));
+	}
+
+	free(tempQueue);
+}
+
+// Check if the blockedProcesses IO time is 0
+void checkBlockedProcesses(Queue *blockedProcesses, Process *processArray, int index)
+{
+	// Create a temp queue
+	Queue *tempQueue = createQueue();
+
+	// Dequeue each process and determine if IO time is 0
+	while (!isEmpty(blockedProcesses))
+	{
+		Process *process = dequeue(blockedProcesses);
+
+		if (process->io_time == 0) // If IO time is 0, add it to process array
+		{
+			processArray[index] = *process;
+			index++;
+			free(process);
+		}
+		else // Otherwise, add it to temp queue
+		{
+			enqueue(tempQueue, process);
+		}
+	}
+
+	// Move processes in tempQueue back to blockedProcesses
+	while (!isEmpty(tempQueue))
+	{
+		enqueue(blockedProcesses, dequeue(tempQueue));
+	}
+
+	free(tempQueue);
 }
