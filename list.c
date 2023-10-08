@@ -53,7 +53,7 @@ void delete(struct node **head, Process *process)
 }
 
 // Check if the list is empty
-int IsEmpty(struct node *head)
+int IsEmptyList(struct node *head)
 {
     return head == NULL; // 1 if empty, 0 if not empty
 }

@@ -18,5 +18,5 @@ struct node
 // insert and delete operations.
 void insert(struct node **head, Process *process);
 void delete(struct node **head, Process *process);
-int isEmpty(struct node *head);
+int isEmptyList(struct node *head);
 void traverse(struct node *head);

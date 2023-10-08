@@ -15,6 +15,7 @@ void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue
 void check_process_completion(int num_of_processes, int *processIDs, Process *input);
 void checkBlockedProcesses(Queue *blockedProcesses, Process *processArray, int index);
 void decrementBlockedProcessesIO(Queue *blockedProcesses);
+void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process **runningProcess, char *outputMessage);
 int determine_CPU_timer(Process *process);
 
 int main(int argc, char *argv[])
@@ -81,7 +82,7 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 	blockedProcesses = createQueue();
 
 	// Output message
-	char *outputMessage = malloc(20 * num_of_processes * sizeof(char));
+	char *outputMessage;
 
 	int timer = 0;
 	int check = 1;
@@ -109,8 +110,10 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 			{
 				enqueue(blockedProcesses, tempP);
 			}
-			runningProcess[0] == NULL;
+			runningProcess[0] = NULL;
 		}
+		formatOutputMessage(num_of_processes, timer, blockedProcesses, processQueue, runningProcess, outputMessage);
+		printf(outputMessage);
 		check_process_completion(num_of_processes, processIDs, input);
 		for (int i = 0; i < num_of_processes; i++)
 		{
@@ -128,6 +131,7 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 	free(runningProcess[0]); // Free the memory for the running process
 }
 
+// Sorts an array of processes by processID
 void sort(Process *processes[], int num_of_processes)
 {
 	int swapped;
@@ -139,7 +143,7 @@ void sort(Process *processes[], int num_of_processes)
 
 		for (int j = 0; j < num_of_processes - i - 1; j++)
 		{
-			// Compare processes[j] and processes[j + 1] based on some criteria
+			// Compare processes[j] and processes[j + 1] based on pid
 			if (processes[j]->pid > processes[j + 1]->pid)
 			{
 				// Swap processes[j] and processes[j + 1]
@@ -246,7 +250,7 @@ void decrementBlockedProcessesIO(Queue *blockedProcesses)
 	Queue *tempQueue = createQueue();
 
 	// Dequeue each process and decrement IO
-	while (!isEmpty(blockedProcesses))
+	while (isEmpty(blockedProcesses) == 0)
 	{
 		Process *process = dequeue(blockedProcesses);
 		process->io_time--;
@@ -254,7 +258,7 @@ void decrementBlockedProcessesIO(Queue *blockedProcesses)
 	}
 
 	// Move the processes back from the temporary queue to the blockedProcesses queue
-	while (!isEmpty(tempQueue))
+	while (isEmpty(tempQueue) == 0)
 	{
 		enqueue(blockedProcesses, dequeue(tempQueue));
 	}
@@ -269,7 +273,7 @@ void checkBlockedProcesses(Queue *blockedProcesses, Process *processArray, int i
 	Queue *tempQueue = createQueue();
 
 	// Dequeue each process and determine if IO time is 0
-	while (!isEmpty(blockedProcesses))
+	while (isEmpty(blockedProcesses) == 0)
 	{
 		Process *process = dequeue(blockedProcesses);
 
@@ -286,10 +290,70 @@ void checkBlockedProcesses(Queue *blockedProcesses, Process *processArray, int i
 	}
 
 	// Move processes in tempQueue back to blockedProcesses
-	while (!isEmpty(tempQueue))
+	while (isEmpty(tempQueue) == 0)
 	{
 		enqueue(blockedProcesses, dequeue(tempQueue));
 	}
 
 	free(tempQueue);
+}
+
+// Format the output string to the appropriate output
+void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process **runningProcess, char *outputMessage)
+{
+	Queue *tempQueue = createQueue();
+
+	// Create ID array and initialize all values to ""
+	char activeIDs[num_of_processes][7];
+	for (int i = 0; i < num_of_processes; i++)
+	{
+		strcpy(activeIDs[i], "");
+	}
+
+	// Getting ID of running process
+	if (runningProcess[0] == NULL)
+	{
+		strcpy(activeIDs[runningProcess[0]->pid], "running");
+	}
+
+	// Getting the IDs of the blocked processes
+	while (isEmpty(blockedProcesses) == 0)
+	{
+		Process *process = dequeue(blockedProcesses);
+		strcpy(activeIDs[process->pid], "blocked");
+		enqueue(tempQueue, process);
+		free(process);
+	}
+	while (isEmpty(tempQueue) == 0) // Adding the processes back to blockedProcesses
+	{
+		enqueue(blockedProcesses, dequeue(tempQueue));
+	}
+
+	// Repeating same process for readyProcesses queue
+	while (isEmpty(readyQueue) == 0)
+	{
+		Process *process = dequeue(readyQueue);
+		strcpy(activeIDs[process->pid], "ready");
+		enqueue(tempQueue, process);
+		free(process);
+	}
+	while (isEmpty(tempQueue) == 0)
+	{
+		enqueue(readyQueue, dequeue(tempQueue));
+	}
+	free(tempQueue);
+
+	// Loop to format the output message:
+	char *processStatuses = malloc(20 * num_of_processes * sizeof(char));
+
+	for (int i = 0; i < num_of_processes; i++)
+	{
+		if (strcmp(activeIDs[i], "") != 0)
+		{
+			sprintf(processStatuses, "%d: %s ", i, activeIDs[i]);
+		}
+	}
+	sprintf(outputMessage, "%d %s", timer, processStatuses);
+
+	// Find the status of the
 }
