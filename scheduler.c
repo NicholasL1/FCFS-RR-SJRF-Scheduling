@@ -153,7 +153,7 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 				else
 				{
 					input[tempP->pid].cpu_time = 0;
-					turnaroundTimes[tempP->pid] = (timer)-tempP->arrival_time + 1;
+					turnaroundTimes[tempP->pid] = timer - tempP->arrival_time + 1;
 				}
 				runningProcess[0] = NULL;
 			}
