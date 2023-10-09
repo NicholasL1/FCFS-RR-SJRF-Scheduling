@@ -43,6 +43,8 @@ int main(int argc, char *argv[])
 {
 	FILE *fp;
 
+	argc = argc;
+
 	int num_of_processes;
 	int algo;
 
