@@ -26,16 +26,20 @@ void decrementBlockedProcessesIO(Queue *blockedProcesses, Process *input);
 int checkBlockedProcesses(Queue *blockedProcesses, Process **processArray, int index);
 int compareProcesses(const void *a, const void *b);
 void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process *runningProcess, char *outputMessage);
-void check_process_completion(int num_of_processes, int *processIDs, Process *input);
+int check_process_completion(int num_of_processes, Process *input);
 
 int main(int argc, char *argv[])
 {
 	FILE *fp;
 
 	int num_of_processes;
+	int algo;
 
 	fp = fopen(argv[1], "r");
 	fscanf(fp, "%d", &num_of_processes);
+
+	algo = atoi(argv[2]);
+
 	if (num_of_processes > 0)
 	{
 		Queue *processQueue = createQueue();
@@ -49,8 +53,11 @@ int main(int argc, char *argv[])
 						 &queue[i].io_time,
 						 &queue[i].arrival_time);
 		}
-		first_come_first_served(num_of_processes, processQueue, queue);
-		free(queue);
+		if (algo == 0)
+		{
+			first_come_first_served(num_of_processes, processQueue, queue);
+			free(queue);
+		}
 	}
 
 	fclose(fp);
@@ -87,7 +94,7 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 	int check = 1;
 	int timer = 0;
 	int burstTimer = 0;
-	while (check != 0 && timer != 8)
+	while (check != 0)
 	{
 		add_processes_at_current_time(num_of_processes, timer, processQueue, input, blockedProcesses);
 		if (processQueue->size > 0)
@@ -104,6 +111,13 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 
 		// Format and print output message for this timer iteration
 		formatOutputMessage(num_of_processes, timer, blockedProcesses, processQueue, runningProcess[0], outputMessage);
+		if (strlen(outputMessage) < 4)
+		{
+			if (check_process_completion(num_of_processes, input) != 0)
+			{
+				break;
+			}
+		}
 		printf("%s\n", outputMessage);
 
 		if (burstTimer > 0) // If CPU timer is running for a process, then decrement the timer
@@ -121,15 +135,6 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 					input[tempP->pid].cpu_time = 0;
 				}
 				runningProcess[0] = NULL;
-			}
-		}
-		check_process_completion(num_of_processes, processIDs, input);
-		for (int i = 0; i < num_of_processes; i++)
-		{
-			check = 0;
-			if (processIDs[i] != -1)
-			{
-				check = 1;
 			}
 		}
 		timer++;
@@ -354,14 +359,15 @@ void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesse
 	sprintf(outputMessage, "%d %s", timer, processStatuses);
 }
 
-// Check if a process does not have IO or CPU time remaining, meaning it is completed
-void check_process_completion(int num_of_processes, int *processIDs, Process *input)
+// Check if a input still has remaining cpu time, then we cannot break out the while loop
+int check_process_completion(int num_of_processes, Process *input)
 {
 	for (int i = 0; i < num_of_processes; i++)
 	{
-		if (input[i].cpu_time == 0 && input[i].io_time == 0)
+		if (input[i].cpu_time != 0)
 		{
-			processIDs[i] = -1;
+			return 0;
 		}
 	}
+	return 1;
 }
