@@ -1,22 +1,31 @@
+/**
+ *  scheduler.c
+ *
+ *  Full Name: Nicholas Lachhman
+ *  Course section: B
+ *  Description of the program: FCFS, RR, AND SJRF Scheduling for processes
+ *
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "process.h"
 #include "list.h"
 #include "scheduler.h"
+#include "process.h"
 #include "queue.h"
 
 #define SIZE 100
 
 void first_come_first_served(int num_of_processes, Queue *processQueue, Process *input);
-void sort(Process *processes[], int num_of_processes);
 void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses);
-void check_process_completion(int num_of_processes, int *processIDs, Process *input);
-void checkBlockedProcesses(Queue *blockedProcesses, Process *processArray, int index);
-void decrementBlockedProcessesIO(Queue *blockedProcesses);
-void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process **runningProcess, char *outputMessage);
+void sort(Process *processes[], int num_of_processes);
 int determine_CPU_timer(Process *process);
+void decrementBlockedProcessesIO(Queue *blockedProcesses);
+int checkBlockedProcesses(Queue *blockedProcesses, Process **processArray, int index);
+int compareProcesses(const void *a, const void *b);
+void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process *runningProcess, char *outputMessage);
 
 int main(int argc, char *argv[])
 {
@@ -28,9 +37,7 @@ int main(int argc, char *argv[])
 	fscanf(fp, "%d", &num_of_processes);
 	if (num_of_processes > 0)
 	{
-		Queue *processQueue;
-		processQueue = createQueue();
-
+		Queue *processQueue = createQueue();
 		Process *queue = malloc(num_of_processes * sizeof(Process));
 
 		for (int i = 0; i < num_of_processes; i++)
@@ -41,16 +48,6 @@ int main(int argc, char *argv[])
 						 &queue[i].io_time,
 						 &queue[i].arrival_time);
 		}
-
-		for (int i = 0; i < num_of_processes; i++)
-		{
-			printf("A: %d B: %d  C: %d D: %d \n",
-						 queue[i].pid,
-						 queue[i].cpu_time,
-						 queue[i].io_time,
-						 queue[i].arrival_time);
-		}
-
 		first_come_first_served(num_of_processes, processQueue, queue);
 		free(queue);
 	}
@@ -60,36 +57,35 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
+// First come first served scheduling method
 void first_come_first_served(int num_of_processes, Queue *processQueue, Process *input)
 {
-	// Array to hold all the process ids, if all the processes are -1 then they have all been completed
-	int *processIDs;
-	processIDs = (int *)malloc(num_of_processes * sizeof(int));
 
+	// Array to hold all the process ids, if all the processes are -1 then they have all been completed
+	int processIDs[num_of_processes];
 	for (int i = 0; i < num_of_processes; i++)
 	{
 		processIDs[i] = input[i].pid;
 	}
-	// Process holder
-	Process *tempP;
 
-	// Array for holding the process running (only one can run)
-	Process *runningProcess[1];
-	runningProcess[0] = NULL; // Initialize to NULL
+	// Output message
+	char *outputMessage = malloc(20 * num_of_processes * sizeof(char));
+
+	// Process holder
+	Process *tempP = (Process *)malloc(sizeof(Process));
 
 	// Queue for holding blocked processes
 	Queue *blockedProcesses;
 	blockedProcesses = createQueue();
 
-	// Output message
-	char *outputMessage;
+	// Array for holding the process running (only one can run)
+	Process *runningProcess[1];
+	runningProcess[0] = NULL; // Initialize to NULL
 
 	int timer = 0;
-	int check = 1;
 	int burstTimer = 0;
-	while (check != 0)
+	while (timer < 8)
 	{
-		decrementBlockedProcessesIO(blockedProcesses);
 		add_processes_at_current_time(num_of_processes, timer, processQueue, input, blockedProcesses);
 		if (processQueue->size > 0)
 		{
@@ -100,70 +96,35 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 				burstTimer = determine_CPU_timer(tempP);
 			}
 		}
+		decrementBlockedProcessesIO(blockedProcesses);
+
+		// Format and print output message for this timer iteration
+		formatOutputMessage(num_of_processes, timer, blockedProcesses, processQueue, runningProcess[0], outputMessage);
+		printf("%s\n", outputMessage);
+
 		if (burstTimer > 0) // If CPU timer is running for a process, then decrement the timer
 		{
 			burstTimer--;
-		}
-		else if (burstTimer == 0 && runningProcess[0] != NULL) // Otherwise it has ended and IO time has started, process can be removed from running array
-		{
-			if (tempP->cpu_time > 0)
+			if (burstTimer == 0) // It has ended and IO time has started, process can be removed from running array
 			{
-				enqueue(blockedProcesses, tempP);
-			}
-			runningProcess[0] = NULL;
-		}
-		formatOutputMessage(num_of_processes, timer, blockedProcesses, processQueue, runningProcess, outputMessage);
-		printf(outputMessage);
-		check_process_completion(num_of_processes, processIDs, input);
-		for (int i = 0; i < num_of_processes; i++)
-		{
-			check = 0;
-			if (processIDs[i] != -1)
-			{
-				check = 1;
+				tempP = runningProcess[0];
+				if (tempP->cpu_time > 0)
+				{
+					enqueue(blockedProcesses, tempP);
+				}
+				runningProcess[0] = NULL;
 			}
 		}
 		timer++;
 	}
-
-	// Free dynamically allocated memory when no longer needed
-	free(outputMessage);
-	free(runningProcess[0]); // Free the memory for the running process
 }
 
-// Sorts an array of processes by processID
-void sort(Process *processes[], int num_of_processes)
-{
-	int swapped;
-	Process *temp;
+// 	// Free dynamically allocated memory when no longer needed
+// 	free(outputMessage);
+// 	free(runningProcess[0]); // Free the memory for the running process
+// }
 
-	for (int i = 0; i < num_of_processes - 1; i++)
-	{
-		swapped = 0; // Check if any elements were swapped in this pass
-
-		for (int j = 0; j < num_of_processes - i - 1; j++)
-		{
-			// Compare processes[j] and processes[j + 1] based on pid
-			if (processes[j]->pid > processes[j + 1]->pid)
-			{
-				// Swap processes[j] and processes[j + 1]
-				temp = processes[j];
-				processes[j] = processes[j + 1];
-				processes[j + 1] = temp;
-
-				swapped = 1; // Set the flag to true since a swap occurred
-			}
-		}
-
-		// If no two elements were swapped in this pass, the array is already sorted
-		if (swapped == 0)
-		{
-			break;
-		}
-	}
-}
-
-// Check if the processes have an arrival time the same as the current timer, if so add to queue
+// // Check if the processes have an arrival time the same as the current timer, if so add to queue
 void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses)
 {
 	// Temp queue that adds all the current ready processes
@@ -175,7 +136,7 @@ void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue
 		return;
 	}
 	// Count how many processes have an arrival time the same as timer
-	int count = 0; // Initialize count
+	int count = 0;
 
 	// Create array with the size as the number found above, then add those processes to that array
 	Process *processArray[num_of_processes]; // Use the maximum possible size
@@ -193,13 +154,11 @@ void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue
 			count++; // Increment count
 		}
 	}
-
 	// Add any blocked processes that are ready into process array
-	checkBlockedProcesses(blockedProcesses, processArray, count);
+	count = checkBlockedProcesses(blockedProcesses, processArray, count);
 
 	// Sort the processes array
 	sort(processArray, count); // Sort only the valid elements
-
 	// Add the processes to the queue
 	for (int i = 0; i < count; i++)
 	{
@@ -207,16 +166,24 @@ void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue
 	}
 }
 
-// Check if a process does not have IO or CPU time remaining, meaning it is completed
-void check_process_completion(int num_of_processes, int *processIDs, Process *input)
+// Helper method for sorting
+int compareProcesses(const void *a, const void *b)
 {
-	for (int i = 0; i < num_of_processes; i++)
+	// Compare two processes based on their pid field
+	return ((Process *)a)->pid - ((Process *)b)->pid;
+}
+
+// Sort array of processes
+void sort(Process *processes[], int num_of_processes)
+{
+	// Check for valid input
+	if (processes == NULL || num_of_processes <= 0)
 	{
-		if (input[i].cpu_time == 0 && input[i].io_time == 0)
-		{
-			processIDs[i] = -1;
-		}
+		return;
 	}
+
+	// Use the qsort function from the standard library to sort the array of pointers
+	qsort(processes, num_of_processes, sizeof(Process *), compareProcesses);
 }
 
 // Method to determine what the value of the CPU timer should be
@@ -229,12 +196,16 @@ int determine_CPU_timer(Process *process)
 	}
 	else
 	{
+		if (process->cpu_time == 1) // If CPU time is 1
+		{
+			timer = 1;
+		}
 		// IF CPU time is even and we don't have to round up
-		if (process->cpu_time % 2 == 0)
+		else if (process->cpu_time % 2 == 0)
 		{
 			timer = process->cpu_time / 2;
 		}
-		else // Otherwise it is odd and we have to round up
+		else if (process->cpu_time % 2 == 1) // Otherwise it is odd and we have to round up
 		{
 			timer = process->cpu_time / 2 + 1;
 		}
@@ -267,7 +238,7 @@ void decrementBlockedProcessesIO(Queue *blockedProcesses)
 }
 
 // Check if the blockedProcesses IO time is 0
-void checkBlockedProcesses(Queue *blockedProcesses, Process *processArray, int index)
+int checkBlockedProcesses(Queue *blockedProcesses, Process **processArray, int index)
 {
 	// Create a temp queue
 	Queue *tempQueue = createQueue();
@@ -279,9 +250,21 @@ void checkBlockedProcesses(Queue *blockedProcesses, Process *processArray, int i
 
 		if (process->io_time == 0) // If IO time is 0, add it to process array
 		{
-			processArray[index] = *process;
+			Process *newProcess = (Process *)malloc(sizeof(Process)); // Allocate a new Process struct
+			if (newProcess == NULL)
+			{
+				fprintf(stderr, "Error: Unable to allocate memory for a new process.\n");
+				exit(EXIT_FAILURE);
+			}
+
+			// Copy the data from the original process to the new one
+			newProcess->pid = process->pid;
+			newProcess->cpu_time = process->cpu_time;
+			newProcess->io_time = process->io_time;
+			newProcess->arrival_time = process->arrival_time;
+
+			processArray[index] = newProcess; // Add the new process to processArray
 			index++;
-			free(process);
 		}
 		else // Otherwise, add it to temp queue
 		{
@@ -292,28 +275,28 @@ void checkBlockedProcesses(Queue *blockedProcesses, Process *processArray, int i
 	// Move processes in tempQueue back to blockedProcesses
 	while (isEmpty(tempQueue) == 0)
 	{
-		enqueue(blockedProcesses, dequeue(tempQueue));
+		Process *p = dequeue(tempQueue);
+		enqueue(blockedProcesses, p);
 	}
-
-	free(tempQueue);
+	return index;
 }
 
-// Format the output string to the appropriate output
-void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process **runningProcess, char *outputMessage)
+void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process *runningProcess, char *outputMessage)
 {
 	Queue *tempQueue = createQueue();
 
+	sprintf(outputMessage, "%d ", timer);
 	// Create ID array and initialize all values to ""
-	char activeIDs[num_of_processes][7];
+	char activeIDs[num_of_processes][10];
 	for (int i = 0; i < num_of_processes; i++)
 	{
 		strcpy(activeIDs[i], "");
 	}
 
 	// Getting ID of running process
-	if (runningProcess[0] == NULL)
+	if (runningProcess != NULL)
 	{
-		strcpy(activeIDs[runningProcess[0]->pid], "running");
+		strcpy(activeIDs[runningProcess->pid], "running");
 	}
 
 	// Getting the IDs of the blocked processes
@@ -322,7 +305,6 @@ void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesse
 		Process *process = dequeue(blockedProcesses);
 		strcpy(activeIDs[process->pid], "blocked");
 		enqueue(tempQueue, process);
-		free(process);
 	}
 	while (isEmpty(tempQueue) == 0) // Adding the processes back to blockedProcesses
 	{
@@ -332,10 +314,9 @@ void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesse
 	// Repeating same process for readyProcesses queue
 	while (isEmpty(readyQueue) == 0)
 	{
-		Process *process = dequeue(readyQueue);
-		strcpy(activeIDs[process->pid], "ready");
-		enqueue(tempQueue, process);
-		free(process);
+		Process *process2 = dequeue(readyQueue);
+		strcpy(activeIDs[process2->pid], "ready");
+		enqueue(tempQueue, process2);
 	}
 	while (isEmpty(tempQueue) == 0)
 	{
@@ -350,10 +331,10 @@ void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesse
 	{
 		if (strcmp(activeIDs[i], "") != 0)
 		{
-			sprintf(processStatuses, "%d: %s ", i, activeIDs[i]);
+			char temp[20];
+			snprintf(temp, sizeof(temp), "%d: %s ", i, activeIDs[i]);
+			strcat(processStatuses, temp);
 		}
 	}
 	sprintf(outputMessage, "%d %s", timer, processStatuses);
-
-	// Find the status of the
 }

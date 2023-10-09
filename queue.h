@@ -18,7 +18,7 @@ typedef struct Queue
 
 // Function prototypes
 Queue *createQueue();
-void enqueue(Queue *queue, struct Process *data);
+void enqueue(Queue *queue, Process *data);
 struct Process *dequeue(Queue *queue);
 int length(Queue *queue);
 struct Process *peek(Queue *queue);

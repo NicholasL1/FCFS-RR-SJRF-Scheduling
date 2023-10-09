@@ -19,7 +19,7 @@ Queue *createQueue()
 }
 
 // Enqueue a new element at the rear of the queue
-void enqueue(Queue *queue, struct Process *data)
+void enqueue(Queue *queue, Process *data)
 {
   QueueNode *newNode = (QueueNode *)malloc(sizeof(QueueNode));
   if (newNode == NULL)

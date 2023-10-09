@@ -11,7 +11,7 @@
 #define PROCESS_H
 
 // representation of a a process
-typedef struct process
+typedef struct Process
 {
     int pid;
     int cpu_time;
