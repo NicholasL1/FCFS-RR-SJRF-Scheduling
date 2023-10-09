@@ -22,16 +22,19 @@ int totalTime;
 int cpuDowntime = 0;
 double cpuUtil;
 int *turnaroundTimes;
+int *halfCPUTimes;
 
 void first_come_first_served(int num_of_processes, Queue *processQueue, Process *input);
-void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses);
+void round_robin(int num_of_processes, Queue *processQueue, Process *input);
+void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses, Queue *readyQueue);
 void sort(Process *processes[], int num_of_processes);
 int determine_CPU_timer(Process *process);
 void decrementBlockedProcessesIO(Queue *blockedProcesses, Process *input);
 int checkBlockedProcesses(Queue *blockedProcesses, Process **processArray, int index);
 int compareProcesses(const void *a, const void *b);
-void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process *runningProcess, char *outputMessage);
+void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process *runningProcess, Queue *readyQueue2, char *outputMessage);
 int check_process_completion(int num_of_processes, Process *input);
+int determine_CPU_timer_RR(Process *process);
 
 int main(int argc, char *argv[])
 {
@@ -68,8 +71,19 @@ int main(int argc, char *argv[])
 			{
 				printf("Turnaround Process %d: %d\n", i, turnaroundTimes[i]);
 			}
-			free(queue);
 		}
+		else if (algo == 1)
+		{
+			round_robin(num_of_processes, processQueue, queue);
+			cpuUtil = (double)(totalTime - (cpuDowntime - 1)) / totalTime;
+			printf("\nFinishing time: %d\n", totalTime - 1);
+			printf("CPU Utilization: %.2lf\n", cpuUtil);
+			for (int i = 0; i < num_of_processes; i++)
+			{
+				printf("Turnaround Process %d: %d\n", i, turnaroundTimes[i]);
+			}
+		}
+		free(queue);
 	}
 
 	fclose(fp);
@@ -77,7 +91,116 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-// First come first served scheduling method
+// Round robin scheduling method
+void round_robin(int num_of_processes, Queue *processQueue, Process *input)
+{
+	// Initialize global array for storing turnaround times
+	turnaroundTimes = (int *)malloc(num_of_processes * sizeof(int));
+
+	// Initialize global array for storing half the CPU times for initial processing
+	halfCPUTimes = (int *)malloc(num_of_processes * sizeof(int));
+
+	// Array to hold all the process ids, if all the processes are -1 then they have all been completed
+	int *processIDs;
+	processIDs = (int *)malloc(num_of_processes * sizeof(int));
+
+	for (int i = 0; i < num_of_processes; i++)
+	{
+		processIDs[i] = input[i].pid;
+		Process *newP = (Process *)malloc(sizeof(Process));
+		newP->pid = input[i].pid;
+		newP->cpu_time = input[i].cpu_time;
+		newP->io_time = input[i].io_time;
+		newP->arrival_time = input[i].arrival_time;
+		halfCPUTimes[i] = determine_CPU_timer(newP);
+		printf("half CPU Time at PID %d: %d\n", i, halfCPUTimes[i]);
+		free(newP);
+	}
+
+	// Output message
+	char *outputMessage = malloc(20 * num_of_processes * sizeof(char));
+
+	// Process holder
+	Process *tempP = (Process *)malloc(sizeof(Process));
+
+	// Queue for holding blocked processes
+	Queue *blockedProcesses;
+	blockedProcesses = createQueue();
+
+	// Queue for holding ready processes that aren't blocked
+	Queue *readyQueue;
+	readyQueue = createQueue();
+
+	// Array for holding the process running (only one can run)
+	Process *runningProcess[1];
+	runningProcess[0] = NULL; // Initialize to NULL
+
+	int check = 1;
+	int timer = 0;
+	int burstTimer = 0;
+	while (check != 0)
+	{
+		add_processes_at_current_time(num_of_processes, timer, processQueue, input, blockedProcesses, readyQueue);
+		if (processQueue->size > 0)
+		{
+			if (runningProcess[0] == NULL)
+			{
+				tempP = dequeue(processQueue);
+				runningProcess[0] = tempP;
+				burstTimer = determine_CPU_timer_RR(tempP);
+				input[tempP->pid].cpu_time = input[tempP->pid].cpu_time - burstTimer;
+			}
+		}
+		// Check if there is no process running
+		if (runningProcess[0] == NULL)
+		{
+			cpuDowntime++;
+		}
+		decrementBlockedProcessesIO(blockedProcesses, input);
+
+		// Format and print output message for this timer iteration
+		formatOutputMessage(num_of_processes, timer, blockedProcesses, processQueue, runningProcess[0], readyQueue, outputMessage);
+		if (strlen(outputMessage) < 4)
+		{
+			if (check_process_completion(num_of_processes, input) != 0)
+			{
+				totalTime = timer;
+				break;
+			}
+		}
+		printf("%s\n", outputMessage);
+
+		if (burstTimer > 0) // If CPU timer is running for a process, then decrement the timer
+		{
+			burstTimer--;
+			if (burstTimer == 0) // It has ended and IO time has started, process can be removed from running array
+			{
+				tempP = runningProcess[0];
+				if (tempP->cpu_time > 0)
+				{
+					if (halfCPUTimes[tempP->pid] == 0 && tempP->io_time > 0)
+					{
+						enqueue(blockedProcesses, tempP);
+					}
+					else
+					{
+						enqueue(readyQueue, tempP);
+					}
+				}
+				else
+				{
+					input[tempP->pid].cpu_time = 0;
+					turnaroundTimes[tempP->pid] = timer - tempP->arrival_time + 1;
+				}
+				runningProcess[0] = NULL;
+			}
+		}
+		timer++;
+	}
+	free(outputMessage);
+	free(runningProcess[0]);
+}
+
 void first_come_first_served(int num_of_processes, Queue *processQueue, Process *input)
 {
 	// Initialize global array for storing turnaround times
@@ -101,6 +224,10 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 	Queue *blockedProcesses;
 	blockedProcesses = createQueue();
 
+	// Filler queue
+	Queue *readyQueue;
+	readyQueue = createQueue();
+
 	// Array for holding the process running (only one can run)
 	Process *runningProcess[1];
 	runningProcess[0] = NULL; // Initialize to NULL
@@ -110,7 +237,7 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 	int burstTimer = 0;
 	while (check != 0)
 	{
-		add_processes_at_current_time(num_of_processes, timer, processQueue, input, blockedProcesses);
+		add_processes_at_current_time(num_of_processes, timer, processQueue, input, blockedProcesses, readyQueue);
 		if (processQueue->size > 0)
 		{
 			if (runningProcess[0] == NULL)
@@ -129,7 +256,7 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 		decrementBlockedProcessesIO(blockedProcesses, input);
 
 		// Format and print output message for this timer iteration
-		formatOutputMessage(num_of_processes, timer, blockedProcesses, processQueue, runningProcess[0], outputMessage);
+		formatOutputMessage(num_of_processes, timer, blockedProcesses, processQueue, runningProcess[0], readyQueue, outputMessage);
 		if (strlen(outputMessage) < 4)
 		{
 			if (check_process_completion(num_of_processes, input) != 0)
@@ -165,7 +292,7 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 }
 
 // // Check if the processes have an arrival time the same as the current timer, if so add to queue
-void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses)
+void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses, Queue *readyQueue)
 {
 	// Temp queue that adds all the current ready processes
 	Queue *tempQueue;
@@ -196,6 +323,13 @@ void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue
 	}
 	// Add any blocked processes that are ready into process array
 	count = checkBlockedProcesses(blockedProcesses, processArray, count);
+
+	// Add any ready processes from the readyQueue to the process array
+	while (isEmpty(readyQueue) == 0)
+	{
+		processArray[count] = dequeue(readyQueue);
+		count++;
+	}
 
 	// Sort the processes array
 	sort(processArray, count); // Sort only the valid elements
@@ -322,7 +456,7 @@ int checkBlockedProcesses(Queue *blockedProcesses, Process **processArray, int i
 	return index;
 }
 
-void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process *runningProcess, char *outputMessage)
+void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process *runningProcess, Queue *readyQueue2, char *outputMessage)
 {
 	Queue *tempQueue = createQueue();
 
@@ -352,7 +486,7 @@ void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesse
 		enqueue(blockedProcesses, dequeue(tempQueue));
 	}
 
-	// Repeating same process for readyProcesses queue
+	// Repeating same process for both readyProcesses queue
 	while (isEmpty(readyQueue) == 0)
 	{
 		Process *process2 = dequeue(readyQueue);
@@ -362,6 +496,17 @@ void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesse
 	while (isEmpty(tempQueue) == 0)
 	{
 		enqueue(readyQueue, dequeue(tempQueue));
+	}
+
+	while (isEmpty(readyQueue2) == 0)
+	{
+		Process *process3 = dequeue(readyQueue2);
+		strcpy(activeIDs[process3->pid], "ready");
+		enqueue(tempQueue, process3);
+	}
+	while (isEmpty(tempQueue) == 0)
+	{
+		enqueue(readyQueue2, dequeue(tempQueue));
 	}
 	free(tempQueue);
 
@@ -391,4 +536,36 @@ int check_process_completion(int num_of_processes, Process *input)
 		}
 	}
 	return 1;
+}
+
+// Method to determine what the value of the CPU timer should be with Round Robin algorithm
+int determine_CPU_timer_RR(Process *process)
+{
+	int timer = 0;
+	if (halfCPUTimes[process->pid] == 0)
+	{
+		if (process->cpu_time < 2)
+		{
+			timer = 1;
+		}
+		else
+		{
+			timer = 2;
+		}
+	}
+	else
+	{
+		if (halfCPUTimes[process->pid] < 2)
+		{
+			timer = 1;
+		}
+		else
+		{
+			timer = 2;
+		}
+	}
+	// Decrement process and halfTime remaining
+	process->cpu_time = process->cpu_time - timer;
+	halfCPUTimes[process->pid] = halfCPUTimes[process->pid] - timer;
+	return timer;
 }
