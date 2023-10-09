@@ -18,6 +18,11 @@
 
 #define SIZE 100
 
+int totalTime;
+int cpuDowntime = 0;
+double cpuUtil;
+int *turnaroundTimes;
+
 void first_come_first_served(int num_of_processes, Queue *processQueue, Process *input);
 void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses);
 void sort(Process *processes[], int num_of_processes);
@@ -56,6 +61,13 @@ int main(int argc, char *argv[])
 		if (algo == 0)
 		{
 			first_come_first_served(num_of_processes, processQueue, queue);
+			cpuUtil = (double)(totalTime - (cpuDowntime - 1)) / totalTime;
+			printf("\nFinishing time: %d\n", totalTime - 1);
+			printf("CPU Utilization: %.2lf\n", cpuUtil);
+			for (int i = 0; i < num_of_processes; i++)
+			{
+				printf("Turnaround Process %d: %d\n", i, turnaroundTimes[i]);
+			}
 			free(queue);
 		}
 	}
@@ -68,6 +80,8 @@ int main(int argc, char *argv[])
 // First come first served scheduling method
 void first_come_first_served(int num_of_processes, Queue *processQueue, Process *input)
 {
+	// Initialize global array for storing turnaround times
+	turnaroundTimes = (int *)malloc(num_of_processes * sizeof(int));
 
 	// Array to hold all the process ids, if all the processes are -1 then they have all been completed
 	int *processIDs;
@@ -107,6 +121,11 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 				input[tempP->pid].cpu_time = input[tempP->pid].cpu_time - burstTimer;
 			}
 		}
+		// Check if there is no process running
+		if (runningProcess[0] == NULL)
+		{
+			cpuDowntime++;
+		}
 		decrementBlockedProcessesIO(blockedProcesses, input);
 
 		// Format and print output message for this timer iteration
@@ -115,6 +134,7 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 		{
 			if (check_process_completion(num_of_processes, input) != 0)
 			{
+				totalTime = timer;
 				break;
 			}
 		}
@@ -133,6 +153,7 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 				else
 				{
 					input[tempP->pid].cpu_time = 0;
+					turnaroundTimes[tempP->pid] = (timer)-tempP->arrival_time + 1;
 				}
 				runningProcess[0] = NULL;
 			}
