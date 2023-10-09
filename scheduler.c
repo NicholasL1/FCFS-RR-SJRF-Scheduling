@@ -22,10 +22,11 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses);
 void sort(Process *processes[], int num_of_processes);
 int determine_CPU_timer(Process *process);
-void decrementBlockedProcessesIO(Queue *blockedProcesses);
+void decrementBlockedProcessesIO(Queue *blockedProcesses, Process *input);
 int checkBlockedProcesses(Queue *blockedProcesses, Process **processArray, int index);
 int compareProcesses(const void *a, const void *b);
 void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process *runningProcess, char *outputMessage);
+void check_process_completion(int num_of_processes, int *processIDs, Process *input);
 
 int main(int argc, char *argv[])
 {
@@ -62,7 +63,8 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 {
 
 	// Array to hold all the process ids, if all the processes are -1 then they have all been completed
-	int processIDs[num_of_processes];
+	int *processIDs;
+	processIDs = (int *)malloc(num_of_processes * sizeof(int));
 	for (int i = 0; i < num_of_processes; i++)
 	{
 		processIDs[i] = input[i].pid;
@@ -82,9 +84,10 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 	Process *runningProcess[1];
 	runningProcess[0] = NULL; // Initialize to NULL
 
+	int check = 1;
 	int timer = 0;
 	int burstTimer = 0;
-	while (timer < 8)
+	while (check != 0 && timer != 8)
 	{
 		add_processes_at_current_time(num_of_processes, timer, processQueue, input, blockedProcesses);
 		if (processQueue->size > 0)
@@ -94,9 +97,10 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 				tempP = dequeue(processQueue);
 				runningProcess[0] = tempP;
 				burstTimer = determine_CPU_timer(tempP);
+				input[tempP->pid].cpu_time = input[tempP->pid].cpu_time - burstTimer;
 			}
 		}
-		decrementBlockedProcessesIO(blockedProcesses);
+		decrementBlockedProcessesIO(blockedProcesses, input);
 
 		// Format and print output message for this timer iteration
 		formatOutputMessage(num_of_processes, timer, blockedProcesses, processQueue, runningProcess[0], outputMessage);
@@ -112,17 +116,27 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 				{
 					enqueue(blockedProcesses, tempP);
 				}
+				else
+				{
+					input[tempP->pid].cpu_time = 0;
+				}
 				runningProcess[0] = NULL;
+			}
+		}
+		check_process_completion(num_of_processes, processIDs, input);
+		for (int i = 0; i < num_of_processes; i++)
+		{
+			check = 0;
+			if (processIDs[i] != -1)
+			{
+				check = 1;
 			}
 		}
 		timer++;
 	}
+	free(outputMessage);
+	free(runningProcess[0]);
 }
-
-// 	// Free dynamically allocated memory when no longer needed
-// 	free(outputMessage);
-// 	free(runningProcess[0]); // Free the memory for the running process
-// }
 
 // // Check if the processes have an arrival time the same as the current timer, if so add to queue
 void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses)
@@ -215,7 +229,7 @@ int determine_CPU_timer(Process *process)
 }
 
 // Decrement the blocked processes IO time
-void decrementBlockedProcessesIO(Queue *blockedProcesses)
+void decrementBlockedProcessesIO(Queue *blockedProcesses, Process *input)
 {
 	// Create a temporary queue to store processes that will be processed
 	Queue *tempQueue = createQueue();
@@ -225,6 +239,7 @@ void decrementBlockedProcessesIO(Queue *blockedProcesses)
 	{
 		Process *process = dequeue(blockedProcesses);
 		process->io_time--;
+		input[process->pid].io_time = input[process->pid].io_time - 1;
 		enqueue(tempQueue, process);
 	}
 
@@ -337,4 +352,16 @@ void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesse
 		}
 	}
 	sprintf(outputMessage, "%d %s", timer, processStatuses);
+}
+
+// Check if a process does not have IO or CPU time remaining, meaning it is completed
+void check_process_completion(int num_of_processes, int *processIDs, Process *input)
+{
+	for (int i = 0; i < num_of_processes; i++)
+	{
+		if (input[i].cpu_time == 0 && input[i].io_time == 0)
+		{
+			processIDs[i] = -1;
+		}
+	}
 }
