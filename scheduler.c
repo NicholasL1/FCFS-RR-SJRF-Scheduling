@@ -11,7 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "list.h"
 #include "scheduler.h"
 #include "process.h"
 #include "queue.h"
@@ -24,17 +23,21 @@ double cpuUtil;
 int *turnaroundTimes;
 int *halfCPUTimes;
 
-void first_come_first_served(int num_of_processes, Queue *processQueue, Process *input);
-void round_robin(int num_of_processes, Queue *processQueue, Process *input);
+void first_come_first_served(int num_of_processes, Queue *processQueue, Process *input, FILE *outputFile);
+void round_robin(int num_of_processes, Queue *processQueue, Process *input, FILE *outputFile);
+void shortest_job_remaining_first(int num_of_processes, Queue *processQueue, Process *input, FILE *outputFile);
 void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses, Queue *readyQueue);
 void sort(Process *processes[], int num_of_processes);
 int determine_CPU_timer(Process *process);
 void decrementBlockedProcessesIO(Queue *blockedProcesses, Process *input);
 int checkBlockedProcesses(Queue *blockedProcesses, Process **processArray, int index);
-int compareProcesses(const void *a, const void *b);
+int compareProcessesPID(const void *a, const void *b);
 void formatOutputMessage(int num_of_processes, int timer, Queue *blockedProcesses, Queue *readyQueue, Process *runningProcess, Queue *readyQueue2, char *outputMessage);
 int check_process_completion(int num_of_processes, Process *input);
 int determine_CPU_timer_RR(Process *process);
+char *removeFileExtension(char *filename);
+void sortQueueByCpuTime(Queue *queue, Process *runningProcess);
+int compareProcessesCPU(const void *a, const void *b);
 
 int main(int argc, char *argv[])
 {
@@ -46,7 +49,15 @@ int main(int argc, char *argv[])
 	fp = fopen(argv[1], "r");
 	fscanf(fp, "%d", &num_of_processes);
 
+	char *inputFileName = argv[1];
 	algo = atoi(argv[2]);
+
+	// Remove the ".txt" extension from the input file name
+	char *baseInputFileName = removeFileExtension(inputFileName);
+
+	// Concatenate '-x.txt' to the base input file name where x is the third argument
+	char *outputFileNameWithSuffix = (char *)malloc(strlen(baseInputFileName) + 7);
+	sprintf(outputFileNameWithSuffix, "%s-%s.txt", baseInputFileName, argv[2]);
 
 	if (num_of_processes > 0)
 	{
@@ -61,26 +72,48 @@ int main(int argc, char *argv[])
 						 &queue[i].io_time,
 						 &queue[i].arrival_time);
 		}
+		// Open the output file for writing
+		FILE *outputFile = fopen(outputFileNameWithSuffix, "w");
+
+		if (outputFile == NULL)
+		{
+			perror("Error opening output file");
+			free(baseInputFileName);
+			free(outputFileNameWithSuffix);
+			return 1;
+		}
+
 		if (algo == 0)
 		{
-			first_come_first_served(num_of_processes, processQueue, queue);
+			first_come_first_served(num_of_processes, processQueue, queue, outputFile);
 			cpuUtil = (double)(totalTime - (cpuDowntime - 1)) / totalTime;
-			printf("\nFinishing time: %d\n", totalTime - 1);
-			printf("CPU Utilization: %.2lf\n", cpuUtil);
+			fprintf(outputFile, "\nFinishing time: %d\n", totalTime - 1);
+			fprintf(outputFile, "CPU Utilization: %.2f\n", cpuUtil);
 			for (int i = 0; i < num_of_processes; i++)
 			{
-				printf("Turnaround Process %d: %d\n", i, turnaroundTimes[i]);
+				fprintf(outputFile, "Turnaround Process %d: %d\n", i, turnaroundTimes[i]);
 			}
 		}
 		else if (algo == 1)
 		{
-			round_robin(num_of_processes, processQueue, queue);
+			round_robin(num_of_processes, processQueue, queue, outputFile);
 			cpuUtil = (double)(totalTime - (cpuDowntime - 1)) / totalTime;
-			printf("\nFinishing time: %d\n", totalTime - 1);
-			printf("CPU Utilization: %.2lf\n", cpuUtil);
+			fprintf(outputFile, "\nFinishing time: %d\n", totalTime - 1);
+			fprintf(outputFile, "CPU Utilization: %.2lf\n", cpuUtil);
 			for (int i = 0; i < num_of_processes; i++)
 			{
-				printf("Turnaround Process %d: %d\n", i, turnaroundTimes[i]);
+				fprintf(outputFile, "Turnaround Process %d: %d\n", i, turnaroundTimes[i]);
+			}
+		}
+		else if (algo == 2)
+		{
+			shortest_job_remaining_first(num_of_processes, processQueue, queue, outputFile);
+			cpuUtil = (double)(totalTime - (cpuDowntime - 1)) / totalTime;
+			fprintf(outputFile, "\nFinishing time: %d\n", totalTime - 1);
+			fprintf(outputFile, "CPU Utilization: %.2lf\n", cpuUtil);
+			for (int i = 0; i < num_of_processes; i++)
+			{
+				fprintf(outputFile, "Turnaround Process %d: %d\n", i, turnaroundTimes[i]);
 			}
 		}
 		free(queue);
@@ -91,8 +124,112 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
+void shortest_job_remaining_first(int num_of_processes, Queue *processQueue, Process *input, FILE *outputFile)
+{
+	// Initialize global array for storing turnaround times
+	turnaroundTimes = (int *)malloc(num_of_processes * sizeof(int));
+
+	// Output message
+	char *outputMessage = malloc(20 * num_of_processes * sizeof(char));
+
+	// Process holder
+	Process *tempP = (Process *)malloc(sizeof(Process));
+
+	// Queue for holding blocked processes
+	Queue *blockedProcesses;
+	blockedProcesses = createQueue();
+
+	// Filler queue - used in RR
+	Queue *readyQueue;
+	readyQueue = createQueue();
+
+	// Array for holding the process running (only one can run)
+	Process *runningProcess[1];
+	runningProcess[0] = NULL; // Initialize to NULL
+
+	int check = 1;
+	int timer = 0;
+	int burstTimer = 0;
+	while (check != 0)
+	{
+		add_processes_at_current_time(num_of_processes, timer, processQueue, input, blockedProcesses, readyQueue);
+		if (processQueue->size > 0)
+		{
+			sortQueueByCpuTime(processQueue, runningProcess[0]);
+			if (runningProcess[0] == NULL)
+			{
+				tempP = dequeue(processQueue);
+				runningProcess[0] = tempP;
+				burstTimer = determine_CPU_timer(tempP);
+				input[tempP->pid].cpu_time = input[tempP->pid].cpu_time - burstTimer;
+			}
+		}
+		// Check if there is no process running
+		if (runningProcess[0] == NULL)
+		{
+			cpuDowntime++;
+		}
+		decrementBlockedProcessesIO(blockedProcesses, input);
+
+		// Format and print output message for this timer iteration
+		formatOutputMessage(num_of_processes, timer, blockedProcesses, processQueue, runningProcess[0], readyQueue, outputMessage);
+		if (strlen(outputMessage) < 4)
+		{
+			if (check_process_completion(num_of_processes, input) != 0)
+			{
+				totalTime = timer;
+				break;
+			}
+		}
+		fprintf(outputFile, "%s\n", outputMessage); // Print output message
+
+		if (burstTimer > 0) // If CPU timer is running for a process, then decrement the timer
+		{
+			burstTimer--;
+			if (burstTimer == 0) // It has ended and IO time has started, process can be removed from running array
+			{
+				tempP = runningProcess[0];
+				if (tempP->cpu_time > 0)
+				{
+					enqueue(blockedProcesses, tempP);
+				}
+				else
+				{
+					input[tempP->pid].cpu_time = 0;
+					turnaroundTimes[tempP->pid] = timer - tempP->arrival_time + 1;
+				}
+				runningProcess[0] = NULL;
+			}
+		}
+		timer++;
+	}
+	free(outputMessage);
+	free(runningProcess[0]);
+}
+
+// Function to remove the file extension from a filename
+char *removeFileExtension(char *filename)
+{
+	char *dot = strrchr(filename, '.');
+	if (!dot || dot == filename)
+	{
+		return strdup(filename); // No extension found, return a copy of the original filename
+	}
+	else
+	{
+		size_t len = dot - filename;
+		char *newFilename = (char *)malloc(len + 1);
+		if (newFilename)
+		{
+			memcpy(newFilename, filename, len);
+			newFilename[len] = '\0';
+		}
+		return newFilename;
+	}
+}
+
 // Round robin scheduling method
-void round_robin(int num_of_processes, Queue *processQueue, Process *input)
+void round_robin(int num_of_processes, Queue *processQueue, Process *input, FILE *outputFile)
 {
 	// Initialize global array for storing turnaround times
 	turnaroundTimes = (int *)malloc(num_of_processes * sizeof(int));
@@ -100,20 +237,14 @@ void round_robin(int num_of_processes, Queue *processQueue, Process *input)
 	// Initialize global array for storing half the CPU times for initial processing
 	halfCPUTimes = (int *)malloc(num_of_processes * sizeof(int));
 
-	// Array to hold all the process ids, if all the processes are -1 then they have all been completed
-	int *processIDs;
-	processIDs = (int *)malloc(num_of_processes * sizeof(int));
-
 	for (int i = 0; i < num_of_processes; i++)
 	{
-		processIDs[i] = input[i].pid;
 		Process *newP = (Process *)malloc(sizeof(Process));
 		newP->pid = input[i].pid;
 		newP->cpu_time = input[i].cpu_time;
 		newP->io_time = input[i].io_time;
 		newP->arrival_time = input[i].arrival_time;
 		halfCPUTimes[i] = determine_CPU_timer(newP);
-		printf("half CPU Time at PID %d: %d\n", i, halfCPUTimes[i]);
 		free(newP);
 	}
 
@@ -168,7 +299,7 @@ void round_robin(int num_of_processes, Queue *processQueue, Process *input)
 				break;
 			}
 		}
-		printf("%s\n", outputMessage);
+		fprintf(outputFile, "%s\n", outputMessage); // Print output message
 
 		if (burstTimer > 0) // If CPU timer is running for a process, then decrement the timer
 		{
@@ -201,18 +332,10 @@ void round_robin(int num_of_processes, Queue *processQueue, Process *input)
 	free(runningProcess[0]);
 }
 
-void first_come_first_served(int num_of_processes, Queue *processQueue, Process *input)
+void first_come_first_served(int num_of_processes, Queue *processQueue, Process *input, FILE *outputFile)
 {
 	// Initialize global array for storing turnaround times
 	turnaroundTimes = (int *)malloc(num_of_processes * sizeof(int));
-
-	// Array to hold all the process ids, if all the processes are -1 then they have all been completed
-	int *processIDs;
-	processIDs = (int *)malloc(num_of_processes * sizeof(int));
-	for (int i = 0; i < num_of_processes; i++)
-	{
-		processIDs[i] = input[i].pid;
-	}
 
 	// Output message
 	char *outputMessage = malloc(20 * num_of_processes * sizeof(char));
@@ -265,7 +388,7 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 				break;
 			}
 		}
-		printf("%s\n", outputMessage);
+		fprintf(outputFile, "%s\n", outputMessage); // Print output message
 
 		if (burstTimer > 0) // If CPU timer is running for a process, then decrement the timer
 		{
@@ -291,13 +414,9 @@ void first_come_first_served(int num_of_processes, Queue *processQueue, Process 
 	free(runningProcess[0]);
 }
 
-// // Check if the processes have an arrival time the same as the current timer, if so add to queue
+// Check if the processes have an arrival time the same as the current timer, if so add to queue
 void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue, Process *input, Queue *blockedProcesses, Queue *readyQueue)
 {
-	// Temp queue that adds all the current ready processes
-	Queue *tempQueue;
-	tempQueue = createQueue();
-
 	if (num_of_processes == 0 || input == NULL)
 	{
 		return;
@@ -340,8 +459,8 @@ void add_processes_at_current_time(int num_of_processes, int timer, Queue *queue
 	}
 }
 
-// Helper method for sorting
-int compareProcesses(const void *a, const void *b)
+// Helper method for sorting by PID
+int compareProcessesPID(const void *a, const void *b)
 {
 	// Compare two processes based on their pid field
 	return ((Process *)a)->pid - ((Process *)b)->pid;
@@ -357,7 +476,7 @@ void sort(Process *processes[], int num_of_processes)
 	}
 
 	// Use the qsort function from the standard library to sort the array of pointers
-	qsort(processes, num_of_processes, sizeof(Process *), compareProcesses);
+	qsort(processes, num_of_processes, sizeof(Process *), compareProcessesPID);
 }
 
 // Method to determine what the value of the CPU timer should be
@@ -568,4 +687,72 @@ int determine_CPU_timer_RR(Process *process)
 	process->cpu_time = process->cpu_time - timer;
 	halfCPUTimes[process->pid] = halfCPUTimes[process->pid] - timer;
 	return timer;
+}
+
+// Sorts a queue by CPU time and determines if the runningProcess should be replaced
+void sortQueueByCpuTime(Queue *queue, Process *runningProcess)
+{
+	int queueSize = queue->size;
+	if (queueSize <= 1)
+	{
+		return; // Nothing to sort
+	}
+	// Create a temporary queue to hold the sorted elements
+	Queue *tempQueue = createQueue();
+
+	// Create an array of Process pointers to hold the elements temporarily
+	Process **processArray = (Process **)malloc(queueSize * sizeof(Process *));
+	if (processArray == NULL)
+	{
+		fprintf(stderr, "Memory allocation failed.\n");
+		exit(EXIT_FAILURE); // Handle memory allocation failure
+	}
+	// Dequeue all elements from the original queue and store them in the array
+	for (int i = 0; i < queueSize; i++)
+	{
+		processArray[i] = dequeue(queue);
+	}
+
+	// Sort the array based on cpu_time and pid
+	qsort(processArray, queueSize, sizeof(Process *), compareProcessesCPU);
+
+	// If runningProcess is not NULL, find the process with the lowest cpu_time
+	if (runningProcess != NULL)
+	{
+		Process *lowestCpuTimeProcess = processArray[0];
+		if (runningProcess->cpu_time > lowestCpuTimeProcess->cpu_time)
+		{
+			// Replace runningProcess with the one with the lowest cpu_time
+			enqueue(tempQueue, runningProcess);		 // Add the previous runningProcess to the temporary queue
+			runningProcess = lowestCpuTimeProcess; // Update runningProcess
+		}
+	}
+
+	// Enqueue the sorted elements back into the original queue
+	for (int i = 0; i < queueSize; i++)
+	{
+		enqueue(queue, processArray[i]);
+	}
+	// Free the temporary array
+	free(processArray);
+}
+
+// Comparison function for CPU time
+int compareProcessesCPU(const void *a, const void *b)
+{
+	Process *processA = *(Process **)a;
+	Process *processB = *(Process **)b;
+
+	// First, compare by cpu_time
+	int cpuTimeComparison = processA->cpu_time - processB->cpu_time;
+
+	if (cpuTimeComparison != 0)
+	{
+		return cpuTimeComparison; // Sort by cpu_time if they are different
+	}
+	else
+	{
+		// If cpu_time is the same, compare by pid
+		return processA->pid - processB->pid;
+	}
 }
